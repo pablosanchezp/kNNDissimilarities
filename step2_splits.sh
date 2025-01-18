@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-java_command=java 
+java_command=java
 JAR=kNNDissimilarities.jar
 jvm_memory=-Xmx100G
 
@@ -26,7 +26,7 @@ rm OriginalFiles/ratings_CDs_and_VinylTransformed.txt
 
 #Random Global
 train_test=TrainTestRandomGlobal8020
-mkdir -p $train_test 
+mkdir -p $train_test
 
 
 #For Movielens 20M
@@ -44,3 +44,5 @@ $java_command $jvm_memory -jar $JAR -o Statistics -trf "OriginalFiles/ratings_CD
 #For GoodReads
 $java_command $jvm_memory -jar $JAR -o simpleRandomSplit -trf "OriginalFiles/goodreads_reviews_spoiler_JSON_ParsedTransformed.txt" $train_test/"$datasetGoodReads"RandomGlobal8020Train.txt $train_test/"$datasetGoodReads"RandomGlobal8020Test.txt 0.8 2242
 $java_command $jvm_memory -jar $JAR -o Statistics -trf "OriginalFiles/goodreads_reviews_spoiler_JSON_ParsedTransformed.txt" GoodReadsStats.txt
+
+chmod +777 ./MyMediaLite-3.11/bin/item_recommendation

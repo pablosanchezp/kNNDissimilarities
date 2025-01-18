@@ -1,7 +1,9 @@
 package es.uam.eps.knndissimilarities.utils;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.FileNotFoundException;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -24,8 +26,54 @@ import java.util.stream.Stream;
 import org.jooq.lambda.tuple.Tuple2;
 import org.jooq.lambda.tuple.Tuple3;
 
+import es.uam.eps.ir.ranksys.fast.index.FastUserIndex;
+
 
 public final class ProcessData {
+	
+	/***
+	 * Method to parse MyMedialLte recommendations
+	 * 
+	 * @param sourceFile the source file
+	 * @param destFile   the new recommedner file
+	 */
+	public static void parseMyMediaLite(String sourceFile, FastUserIndex<Long> userIndexTest, String destFile) {
+		BufferedReader br;
+		PrintStream writer = null;
+		try {
+			br = new BufferedReader(new FileReader(sourceFile));
+			String line = br.readLine();
+			writer = new PrintStream(destFile);
+
+			while (line != null) {
+				if (line != null) {
+					String[] fullData = line.split("\t");
+					Long user = Long.parseLong(fullData[0]);
+					line = fullData[1].replace("[", "");
+					line = line.replace("]", "");
+					String[] data = line.split(",");
+					if (userIndexTest.containsUser(user)) {
+						for (String itemAndPref : data) {
+							Long item = Long.parseLong(itemAndPref.split(":")[0]);
+							Double preference = Double.parseDouble(itemAndPref.split(":")[1]);
+							writer.println(user + "\t" + item + "\t" + preference);
+						}
+					}
+
+					line = br.readLine();
+				}
+			}
+			br.close();
+			writer.close();
+
+		} catch (FileNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
 	
 	/***
 	 * Method to group the preferences of lastfm by a specific column. The lastfm dataset contains

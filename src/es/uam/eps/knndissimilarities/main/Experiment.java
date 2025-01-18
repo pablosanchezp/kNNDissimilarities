@@ -1,6 +1,15 @@
 package es.uam.eps.knndissimilarities.main;
+import static org.ranksys.formats.parsing.Parsers.lp;
+import static org.ranksys.formats.parsing.Parsers.sp;
+
 import java.io.File;
+import java.io.PrintStream;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -9,12 +18,38 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.jooq.lambda.tuple.Tuple4;
+import org.ranksys.formats.preference.SimpleRatingPreferencesReader;
+import org.ranksys.formats.rec.RecommendationFormat;
+import org.ranksys.formats.rec.SimpleRecommendationFormat;
 
+import es.uam.eps.ir.antimetrics.antirel.BinaryAntiRelevanceModel;
+import es.uam.eps.ir.attrrec.datamodel.feature.SimpleUserFeatureData;
+import es.uam.eps.ir.attrrec.datamodel.feature.SimpleUserFeaturesReader;
+import es.uam.eps.ir.attrrec.datamodel.feature.UserFeatureData;
 import es.uam.eps.ir.attrrec.main.AttributeRecommendationUtils;
+import es.uam.eps.ir.attrrec.metrics.recommendation.averages.WeightedAverageRecommendationMetricIgnoreNoRelevantUsersAndNaNs;
+import es.uam.eps.ir.attrrec.metrics.recommendation.averages.WeightedModelUser;
+import es.uam.eps.ir.attrrec.metrics.recommendation.averages.WeightedModelUser.UserMetricWeight;
+
 import es.uam.eps.ir.attrrec.utils.PredicatesStrategies;
-import es.uam.eps.ir.crossdomainPOI.utils.UsersMidPoints.SCORES_FREQUENCY;
-import es.uam.eps.ir.ranksys.core.feature.FeatureData;
+import es.uam.eps.ir.crossdomainPOI.metrics.system.RealAggregateDiversity;
+import es.uam.eps.ir.crossdomainPOI.metrics.system.UserCoverage;
+import es.uam.eps.ir.ranksys.core.preference.ConcatPreferenceData;
+import es.uam.eps.ir.ranksys.core.preference.PreferenceData;
+import es.uam.eps.ir.ranksys.core.preference.SimplePreferenceData;
+import es.uam.eps.ir.ranksys.diversity.sales.metrics.AggregateDiversityMetric;
+import es.uam.eps.ir.ranksys.diversity.sales.metrics.GiniIndex;
+import es.uam.eps.ir.ranksys.fast.index.FastUserIndex;
+import es.uam.eps.ir.ranksys.fast.index.SimpleFastUserIndex;
 import es.uam.eps.ir.ranksys.fast.preference.FastPreferenceData;
+import es.uam.eps.ir.ranksys.metrics.RecommendationMetric;
+import es.uam.eps.ir.ranksys.metrics.SystemMetric;
+import es.uam.eps.ir.ranksys.metrics.rank.NoDiscountModel;
+import es.uam.eps.ir.ranksys.metrics.rel.BinaryRelevanceModel;
+import es.uam.eps.ir.ranksys.metrics.rel.NoRelevanceModel;
+import es.uam.eps.ir.ranksys.metrics.rel.RelevanceModel;
+
 import es.uam.eps.ir.ranksys.rec.Recommender;
 import es.uam.eps.ir.seqawareev.main.ExperimentUtils;
 import es.uam.eps.knndissimilarities.utils.AntiNeighborsUtils;
@@ -49,10 +84,7 @@ public class Experiment {
 	private static final String OPT_USER_FEATURE_SELECTED = "user feature selected";
 	private static final String OPT_COMPUTE_USER_FILTER = "compute user filter";
 
-	private static final String OPT_SVD_REG_USER = "regularization for users for SVD";
-	private static final String OPT_SVD_REG_ITEM = "regularization for items for SVD";
-	private static final String OPT_SVD_REG_BIAS = "regularization for biases for SVD";
-	private static final String OPT_SVD_LEARN_RATE = "learning rate for SVD";
+
 	private static final String OPT_THRESHOLD = "relevance or matching threshold";
 
 	// Output files
@@ -94,10 +126,15 @@ public class Experiment {
 
 	// Parameters for ranksys non accuracy evaluation
 	private static final String OPT_RANKSYS_RELEVANCE_MODEL = "ranksys relevance model";
+	private static final String DEFAULT_COMPUTE_USER_FILTER = "false";
 	private static final String OPT_RANKSYS_DISCOUNT_MODEL = "ranksys discount model";
 	private static final String OPT_RANKSYS_BACKGROUND = "ranksys background for relevance model";
 	private static final String OPT_RANKSYS_BASE = "ranksys base for discount model";
 	private static final String OPT_MIN_DIFF_TIME_2 = "min diff time2";
+	
+	private static final String OPT_ANTI_RELEVANCE_THRESHOLD = "Anti relevance threshold";
+	private static final String OPT_COMPUTE_ONLY_ACC = "compute also dividing by the number of users in the test set";
+	private static final String OPT_COMPUTE_ANTI_METRICS = "Compute anti-metrics";
 
 	// Mappings
 	private static final String OPT_MAPPING_ITEMS = "file of mapping items";
@@ -150,7 +187,8 @@ public class Experiment {
 	private static final String DEFAULT_ITEMS_RECOMMENDED = "100";
 	private static final String DEFAULT_RECOMMENDATION_STRATEGY = "TRAIN_ITEMS";
 	private static final String DEFAULT_OVERWRITE = "false";
-
+	private static final String DEFAULT_COMPUTE_ANTI_METRICS = "false";
+	
 	private static final String DEFAULT_SVD_LEARNING_RATE = "0.01f";
 	private static final String DEFAULT_SVD_MAX_LEARNING_RATE = "1000f";
 	private static final String DEFAULT_SVD_REG_USER = "0.01f";
@@ -166,9 +204,12 @@ public class Experiment {
 	private static final String DEFAULT_REG1 = "0.01"; // from mymedialite
 	private static final String DEFAULT_REG2 = "0.001"; // from mymedialite
 
+	private static final String DEFAULT_USER_MODEL_WGT = "NORMAL";
+	private static final String DEFAULT_OPT_COMPUTE_ONLY_ACC = "true";
+	
+	
 	// Some values for rank geoFM from Librec
 	private static final String DEFAULT_EPSILON = "0.3";
-	private static final String DEFAULT_C = "1.0";
 
 	
 	private static final String OPT_FEATURES_ITEM_COL = "features item column";
@@ -271,18 +312,10 @@ public class Experiment {
 				// MFs Parameters
 				Integer numIterations = Integer.parseInt(cl.getOptionValue(OPT_NUM_INTERACTIONS, DEFAULT_ITERACTIONS));
 				Integer numFactors = Integer.parseInt(cl.getOptionValue(OPT_K, DEFAULT_FACTORS));
-				Double regUser = Double.parseDouble(cl.getOptionValue(OPT_SVD_REG_USER, DEFAULT_SVD_REG_USER));
-				Double regItem = Double.parseDouble(cl.getOptionValue(OPT_SVD_REG_ITEM, DEFAULT_SVD_REG_ITEM));
-				Double regBias = Double.parseDouble(cl.getOptionValue(OPT_SVD_REG_BIAS, DEFAULT_SVD_REG_BIAS));
-				Double learnRate = Double.parseDouble(cl.getOptionValue(OPT_SVD_LEARN_RATE, DEFAULT_SVD_LEARNING_RATE));
-				Double maxDistance = Double.parseDouble(cl.getOptionValue(OPT_MAX_DISTANCE, DEFAULT_MAX_DISTANCE));
-				Double theta = Double.parseDouble(cl.getOptionValue(OPT_THETA_FACTORIZER, DEFAULT_ALPHA_HKV));
-				Double alphaFactorizer2 = Double.parseDouble(cl.getOptionValue(OPT_ALPHA_FACTORIZER2, DEFAULT_ALPHA_HKV));
+				
 
-				Double beta = Double.parseDouble(cl.getOptionValue(OPT_SVD_BETA, DEFAULT_SVDBETA));
-				boolean useSigmoid = Boolean.parseBoolean(cl.getOptionValue(cl.getOptionValue(OPT_USE_SIGMOID, "false")));
+
 				Double threshold = Double.parseDouble(cl.getOptionValue(OPT_THRESHOLD, "0"));
-				boolean normalize = Boolean.parseBoolean(cl.getOptionValue(OPT_NORMALIZE, "true")); 
 				boolean inverse = Boolean.parseBoolean(cl.getOptionValue(OPT_INVERSE, "true")); 
 				boolean applyJaccard = Boolean.parseBoolean(cl.getOptionValue(OPT_JACCARD, "true")); 
 				
@@ -293,17 +326,13 @@ public class Experiment {
 
 				
 				// Rank Geo
-				Double epsilon = Double.parseDouble(cl.getOptionValue(OPT_EPSILON, DEFAULT_EPSILON));
-				Double c = Double.parseDouble(cl.getOptionValue(OPT_C, DEFAULT_C));
-
+			
 				// HKV Factorizer
 				Double alphaFactorizer = Double.parseDouble(cl.getOptionValue(OPT_ALPHA, DEFAULT_ALPHA_HKV));
 				Double lambdaFactorizer = Double.parseDouble(cl.getOptionValue(OPT_LAMBDA, DEFAULT_LAMBDA));
 
 
-				String poiCoordsFile = cl.getOptionValue(OPT_COORD_FILE);
 
-				String scoreFreq = cl.getOptionValue(OPT_SCORE_FREQ, DEFAULT_SCORE);
 
 				final int numberItemsRecommend = Integer.parseInt(cl.getOptionValue(OPT_ITEMS_RECOMMENDED));
 				int neighbours = Integer.parseInt(cl.getOptionValue(OPT_NEIGH));
@@ -312,7 +341,6 @@ public class Experiment {
 						DEFAULT_RECOMMENDATION_STRATEGY);
 
 
-				SCORES_FREQUENCY scoref = es.uam.eps.ir.crossdomainPOI.mains.ExperimentUtils.obtScoreFreq(scoreFreq);
 
 				if (ranksysSimilarity == null) {
 					System.out.println("Not working with any recommender using similarities");
@@ -334,14 +362,16 @@ public class Experiment {
 
 				trainPrefData = ExperimentUtils.loadTrainFastPreferenceData(trainFile, testFile, completeOrNot, true);
 
-				FeatureData<Long, String, Double> featureData = null;
 				
 
 				System.out.println("Not using wrapper (working with no timestamps)");
 
-				Recommender<Long, Long> rankSysrec = AntiNeighborsUtils.obtRankSysRecommeder(ranksysRecommender, ranksysSimilarity, ranksysSimilarity,
+				Recommender<Long, Long> rankSysrec = AntiNeighborsUtils.obtRankSysRecommeder(ranksysRecommender, ranksysSimilarity, ranksysSimilarity2,
 								trainPrefData, neighbours, numFactors, alphaFactorizer, lambdaFactorizer, numIterations, inverse, applyJaccard, threshold, combiner, normalizer, lambdaFactorizer, negativeAnti);
 
+				if (rankSysrec == null) {
+					System.out.println("RECOMMENDER IS NULL");
+				}
 				System.out.println("Analyzing " + testFile);
 				System.out.println("Recommender file " + outputFile);
 
@@ -354,6 +384,222 @@ public class Experiment {
 
 			}
 				break;
+		
+				
+			case "ParseMyMediaLite": {
+					System.out.println("-o ParseMyMediaLite -trf myMediaLiteRecommendation testFile newRecommendation");
+					System.out.println(Arrays.toString(args));
+					Tuple4<List<Long>, List<Long>, List<Long>, List<Long>> indexes = ExperimentUtils
+							.retrieveTrainTestIndexes(args[4], args[4], false, lp, lp);
+
+					List<Long> usersTest = indexes.v1;
+					FastUserIndex<Long> userIndexTest = SimpleFastUserIndex.load(usersTest.stream());
+
+					ProcessData.parseMyMediaLite(trainFile, userIndexTest, args[5]);
+				}
+					break;	
+				
+		
+		// Ranksys with non accuracy metrics
+				case "ranksysNonAccuracyWithoutFeatureMetricsEvaluation":
+				case "ranksysNonAccuracyMetricsEvaluation":
+				case "ranksysNonAccuracyMetricsEvaluationPerUser":
+				case "ranksysNonAccuracyWithoutFeatureMetricsEvaluationPerUser": {
+					/*
+					 * -Train file -Test file -Recommended file -Item feature file -Ranksys Metric
+					 * -Output file -Threshold -Cutoff
+					 */
+					System.out.println(Arrays.toString(args));
+
+					String recommendedFile = cl.getOptionValue(OPT_RECOMMENDED_FILE);
+					String userFeaturFile = cl.getOptionValue(OPT_USER_FEATURE_FILE);
+					String userSelFeature = cl.getOptionValue(OPT_USER_FEATURE_SELECTED);
+
+					int threshold = Integer.parseInt(cl.getOptionValue(OPT_THRESHOLD));
+
+					
+					String cutoffs = cl.getOptionValue(OPT_CUTOFF);
+					String overwrite = cl.getOptionValue(OPT_OVERWRITE, DEFAULT_OVERWRITE);
+					String userWeightModel = cl.getOptionValue(OPT_USER_MODEL_WGT, DEFAULT_USER_MODEL_WGT);
+
+
+					Boolean computeOnlyAcc = Boolean
+							.parseBoolean(cl.getOptionValue(OPT_COMPUTE_ONLY_ACC, DEFAULT_OPT_COMPUTE_ONLY_ACC));
+
+					Boolean computeUserFilter = Boolean
+							.parseBoolean(cl.getOptionValue(OPT_COMPUTE_USER_FILTER, DEFAULT_COMPUTE_USER_FILTER));
+					
+
+
+
+					Boolean isPerUser = step.contains("PerUser");
+
+					// This ones can be more than one file
+					String outputFileS = cl.getOptionValue(OPT_OUT_RESULT_FILE);
+					String testFileS = cl.getOptionValue(OPT_TEST_FILE);
+
+					//output and test files need to be separated by -
+					String outputFileArr[] = outputFileS.split(",");
+					String testFileArr[] = testFileS.split(",");
+					
+					if (outputFileArr.length == 1) {
+						File f = new File(outputFileArr[0]);
+						
+						// If file of ranksys evaluation already exist then nothing
+						if (f.exists() && !f.isDirectory() && Boolean.parseBoolean(overwrite) == false) {
+							System.out.println("Ignoring " + f + " because it already exists");
+							break;
+						}
+					}
+
+
+
+					if (isPerUser) {
+						System.out.println("Per user evaluation. We will compute the metrics for every user indvidually.");
+					} else {
+						System.out.println("Normal evaluation, computing the average of the results in the metrics.");
+					}
+
+
+
+					final PreferenceData<Long, Long> trainData = SimplePreferenceData
+							.load(SimpleRatingPreferencesReader.get().read(trainFile, lp, lp));
+
+					
+					final PreferenceData<Long, Long> originalRecommendedData = SimplePreferenceData
+							.load(SimpleRatingPreferencesReader.get().read(recommendedFile, lp, lp));
+					
+
+
+
+					
+
+					
+					for (int i = 0; i < outputFileArr.length; i++) {
+						String outputFile = outputFileArr[i];
+						String testFile = testFileArr[i];
+						
+						File f = new File(outputFile);
+						
+						// If file of ranksys evaluation already exist then nothing
+						if (f.exists() && !f.isDirectory() && Boolean.parseBoolean(overwrite) == false) {
+							System.out.println("Ignoring " + f + " because it already exists");
+							continue;
+						}
+
+
+						// End of test Temporal data
+
+						
+						
+						final PreferenceData<Long, Long> testDataNoFilter = SimplePreferenceData
+								.load(SimpleRatingPreferencesReader.get().read(testFile, lp, lp));
+						
+						final PreferenceData<Long, Long> testData = testDataNoFilter;
+						
+						final PreferenceData<Long, Long> totalData = new ConcatPreferenceData<>(trainData, testData);
+
+						final Set<Long> testUsers = testData.getUsersWithPreferences().collect(Collectors.toSet());
+						
+						// recommended data has to be filtered to avoid evaluating users not in test
+						final PreferenceData<Long, Long> recommendedData = AntiNeighborsUtils
+								.filterPreferenceData(originalRecommendedData, testUsers, null);
+
+						////////////////////////
+						// INDIVIDUAL METRICS //
+						////////////////////////
+
+						// Binary relevance and anti relevance model for ranking metrics
+						BinaryRelevanceModel<Long, Long> binRel = new BinaryRelevanceModel<>(false, testData, threshold);
+						
+						// Relevance model for novelty/diversity (can be with or without relevance)
+						RelevanceModel<Long, Long> selectedRelevance = new NoRelevanceModel<>();
+
+						
+
+						int numUsersTest = testData.numUsersWithPreferences();
+						int numUsersRecommended = recommendedData.numUsersWithPreferences();
+						int numItems = totalData.numItemsWithPreferences(); // Num items with preferences in the data
+
+						
+						System.out.println("\n\nNum users in the test set " + numUsersTest);
+						System.out.println("\n\nNum users to whom we have made recommendations " + numUsersRecommended);
+						System.out.println("Modified ratios normalization");
+
+						Map<String, SystemMetric<Long, Long>> sysMetrics = new HashMap<>();
+						// Ranking metrics (avg for recommendation)
+						Map<String, RecommendationMetric<Long, Long>> recMetricsAvgRelUsers = new HashMap<>();
+						Map<String, RecommendationMetric<Long, Long>> recMetricsAllRecUsers = new HashMap<>();
+
+						String[] differentCutoffs = cutoffs.split(",");
+
+						
+
+						
+						UserFeatureData<Long, String, Double> ufD = null;
+						if (!isPerUser) {
+							if (userFeaturFile != null) {
+								ufD = SimpleUserFeatureData.load(SimpleUserFeaturesReader.get().read(userFeaturFile, lp, sp));
+							}
+						}
+						
+						
+						for (String cutoffS : differentCutoffs) {
+							int cutoff = Integer.parseInt(cutoffS);
+							AntiNeighborsUtils.addMetrics(recMetricsAvgRelUsers, recMetricsAllRecUsers,
+									threshold, cutoff, trainData, testData, selectedRelevance, binRel, new NoDiscountModel(), computeOnlyAcc);
+
+		
+								
+
+								sysMetrics.put("aggrdiv@" + cutoff, new AggregateDiversityMetric<>(cutoff, selectedRelevance));
+								sysMetrics.put("gini@" + cutoff, new GiniIndex<>(cutoff, numItems));
+								sysMetrics.put("RealAD@" + cutoff, new RealAggregateDiversity<Long, Long>(cutoff));
+
+						}
+						
+						//User cov goes without cutoff
+						sysMetrics.put("usercov", new UserCoverage<Long, Long>());
+
+						// Average of all only for normal evaluation, not per user
+						if (!isPerUser) {
+
+							UserMetricWeight weight = AntiNeighborsUtils.obtUserMetricWeight(userWeightModel);
+							System.out.println("Working with user weight " + weight.toString());
+
+							WeightedModelUser<Long, Long, String, Double> wmu = new WeightedModelUser<>(trainData, weight,
+									userSelFeature, ufD);
+
+							recMetricsAvgRelUsers.forEach((name, metric) -> sysMetrics.put(name + "_rec",
+									new WeightedAverageRecommendationMetricIgnoreNoRelevantUsersAndNaNs<>(metric, binRel,
+											wmu)));
+
+							recMetricsAllRecUsers.forEach((name, metric) -> sysMetrics.put(name + "_rec",
+									new WeightedAverageRecommendationMetricIgnoreNoRelevantUsersAndNaNs<>(metric, binRel,
+											wmu)));
+
+
+							RecommendationFormat<Long, Long> format = new SimpleRecommendationFormat<>(lp, lp);
+
+							/*
+							 * format.getReader(recommendedFile).readAll() .forEach(rec ->
+							 * sysMetrics.values().forEach(metric -> metric.add(rec)));
+							 */
+
+							System.out.println("Computing user filter: " + computeUserFilter);
+							
+
+							format.getReader(recommendedFile).readAll().forEach(rec -> sysMetrics.values().forEach(metric -> metric.add(rec)));
+
+							PrintStream out = new PrintStream(new File(outputFile));
+							sysMetrics.forEach((name, metric) -> out.println(name + "\t" + metric.evaluate()));
+							out.close();
+						}
+
+
+					}
+
+				}
 		}
 
 	}
@@ -584,10 +830,6 @@ public class Experiment {
 		epsilon.setRequired(false);
 		options.addOption(epsilon);
 
-		Option c = new Option("c", OPT_C, true, "c");
-		c.setRequired(false);
-		options.addOption(c);
-
 		Option userModelWeight = new Option("userModelW", OPT_USER_MODEL_WGT, true, "user model weight");
 		userModelWeight.setRequired(false);
 		options.addOption(userModelWeight);
@@ -656,6 +898,37 @@ public class Experiment {
 		Option negAntiN = new Option("negAntiN", OPT_NEGANTI, true, "negative anti-neigh");
 		negAntiN.setRequired(false);
 		options.addOption(negAntiN);
+		
+		// RankLibrary norm value
+		Option normAggregate = new Option("normAgLib", OPT_NORM_AGGREGATE_LIBRARY, true,
+				"normalization aggregate library");
+		normAggregate.setRequired(false);
+		options.addOption(normAggregate);
+
+		// RankLibrary comb value
+		Option combAggregate = new Option("combAgLib", OPT_COMB_AGGREGATE_LIBRARY, true, "combination aggregate library");
+		combAggregate.setRequired(false);
+		options.addOption(combAggregate);
+
+		// RankLibrary norm value
+		Option weightAggregate = new Option("weightAgLib", OPT_WEIGHT_AGGREGATE_LIBRARY, true,
+				"weight aggregate library");
+		weightAggregate.setRequired(false);
+		options.addOption(weightAggregate);
+		
+		Option antiMetrics = new Option("computeAntiMetrics", OPT_COMPUTE_ANTI_METRICS, true,
+				"boolean in order to compute anti metrics");
+		antiMetrics.setRequired(false);
+		options.addOption(antiMetrics);
+
+		Option antiRelevanceThreshold = new Option("antiRelTh", OPT_ANTI_RELEVANCE_THRESHOLD, true,
+				"integer in order to indicate the antiRelevanceTh");
+		antiRelevanceThreshold.setRequired(false);
+		options.addOption(antiRelevanceThreshold);
+		
+		Option computeOnlyAccuracy = new Option("onlyAcc", OPT_COMPUTE_ONLY_ACC, true, "if we are computing just accuracy metrics or also novelty-diversity");
+		computeOnlyAccuracy.setRequired(false);
+		options.addOption(computeOnlyAccuracy);
 		
 		
 

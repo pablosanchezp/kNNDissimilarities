@@ -29,6 +29,16 @@
  		 <artifactId>AttrEval4RecSys</artifactId>
   		<version>0.2.1-SNAPSHOT</version>
     </dependency>
+    
+    <dependency>
+    	<groupId>rankfusion</groupId>
+    	<artifactId>rankfusion</artifactId>
+    	<version>1.0</version>
+    	<scope>system</scope>
+    	<systemPath>${project.basedir}/libs/rankfusion.jar</systemPath>
+	</dependency>
+    
+
 
   </dependencies>
   
